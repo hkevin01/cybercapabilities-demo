@@ -1,0 +1,12 @@
+# Semgrep rules: OWASP Top 10 + security best practices
+rules:
+  - id: import-owasp-top-ten
+    languages: [generic]
+    patterns: []
+    message: "Using OWASP Top 10 registry rules"
+    severity: INFO
+# Load official rulepacks
+configs:
+  - p/owasp-top-ten
+  - p/javascript
+  - p/secrets
