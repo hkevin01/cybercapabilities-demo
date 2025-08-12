@@ -1,24 +1,17 @@
 /**
- Copilot, implement an intentionally vulnerable Express app for training. Requirements:
- - Use Express with EJS views and body-parser, cookie-parser.
- - SQLite DB file `./db.sqlite` with tables: users(username TEXT, password TEXT), comments(id INTEGER PRIMARY KEY, content TEXT).
- - Seed a default user: admin / admin123 (plaintext).
- - Implement endpoints with known flaws:
-   - POST /login: vulnerable to SQL injection via unparameterized query.
-   - GET /search?q=: vulnerable to reflected XSS and SQL injection.
-   - POST /comment, GET /comments: stored XSS (no output encoding).
-   - POST /upload: save any file to ./uploads without validation; return file path.
-   - POST /exec: run a shell command from user input (command injection).
-   - GET /fetch?url=: naive server-side request without allowlist (SSRF).
-   - GET /admin: returns sensitive data without auth checks.
-   - GET /debug/config: returns process.env as JSON.
- - Add minimal HTML forms for test in responses.
- - Listen on PORT env var or 3000.
+ Intentionally vulnerable Express app for training purposes.
+ DO NOT DEPLOY.
 
- IMPORTANT:
- - Keep vulnerabilities obvious for education.
- - Add comments above each route explaining the vulnerability and how to fix (but do not fix here).
- - Log basic requests to console (no PII).
+ Vulnerabilities demonstrated (OWASP Top 10):
+ - A01 Broken Access Control: /admin has no auth checks.
+ - A03 Injection (SQLi): /login and /search use unparameterized queries.
+ - XSS (Reflected/Stored): /search reflects, /comments stores unsanitized content.
+ - A05 Security Misconfiguration: debug endpoint leaking env.
+ - Command Injection: /exec executes user-supplied shell.
+ - SSRF: /fetch retrieves arbitrary URLs without allowlist.
+ - Insecure File Upload: /upload accepts any file, no validation.
+
+ Each route includes a brief "how to fix" note in comments.
 */
 const express = require('express');
 const path = require('path');
@@ -27,9 +20,13 @@ const sqlite3 = require('sqlite3').verbose();
 const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const { exec } = require('child_process');
-const http = require('http');
-const https = require('https');
 const multer = require('multer');
+
+// Dynamic import for node-fetch since it's ES module only
+let fetch;
+(async () => {
+  fetch = (await import('node-fetch')).default;
+})();
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -39,356 +36,140 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// DB setup
 const DB_PATH = path.join(__dirname, '..', 'db.sqlite');
 const db = new sqlite3.Database(DB_PATH);
-
-// Initialize database with vulnerable schema
 db.serialize(() => {
   db.run('CREATE TABLE IF NOT EXISTS users (username TEXT, password TEXT)');
   db.run('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, content TEXT)');
   db.get('SELECT COUNT(*) as c FROM users', (err, row) => {
     if (!row || row.c === 0) {
-      // VULNERABILITY: Storing passwords in plaintext
       db.run("INSERT INTO users(username, password) VALUES ('admin','admin123')");
-      console.log('Seeded admin user with plaintext password');
+      db.run("INSERT INTO users(username, password) VALUES ('user','password')");
     }
   });
 });
 
-// Create uploads directory
 const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir);
-}
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const upload = multer({ dest: uploadsDir });
 
-// Configure multer for file uploads (intentionally insecure)
-const upload = multer({ 
-  dest: uploadsDir,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
-});
-
+// Index: simple forms to exercise endpoints
 app.get('/', (req, res) => {
-  console.log(`GET / - ${req.ip}`);
   res.send(`
-    <h1>Vulnerable Web App (Training Only)</h1>
-    <p><strong>WARNING:</strong> This application contains intentional security vulnerabilities for educational purposes.</p>
-    
-    <h2>Available Endpoints:</h2>
+    <h1>Vulnerable App (Training Only)</h1>
     <ul>
-      <li><a href="/login-form">POST /login</a> - SQL Injection</li>
-      <li><a href="/search">GET /search</a> - Reflected XSS + SQL Injection</li>
-      <li><a href="/comments">Comments System</a> - Stored XSS</li>
-      <li><a href="/upload-form">File Upload</a> - Insecure Upload</li>
-      <li><a href="/exec-form">Command Execution</a> - Command Injection</li>
-      <li><a href="/fetch-form">URL Fetcher</a> - SSRF</li>
-      <li><a href="/admin">Admin Panel</a> - Broken Access Control</li>
-      <li><a href="/debug/config">Debug Config</a> - Information Disclosure</li>
+      <li><form method="POST" action="/login">
+        <input name="username" placeholder="username">
+        <input name="password" placeholder="password" type="password">
+        <button type="submit">Login (SQLi)</button>
+      </form></li>
+      <li><form method="GET" action="/search">
+        <input name="q" placeholder="Search term (XSS/SQLi)">
+        <button type="submit">Search</button>
+      </form></li>
+      <li><form method="POST" action="/comment">
+        <textarea name="content" placeholder="Comment (Stored XSS)"></textarea>
+        <button type="submit">Post</button>
+      </form> <a href="/comments">View comments</a></li>
+      <li><form method="POST" action="/upload" enctype="multipart/form-data">
+        <input type="file" name="file"><button>Upload (insecure)</button>
+      </form></li>
+      <li><form method="POST" action="/exec">
+        <input name="cmd" placeholder="e.g., ls -la"><button>Exec (danger!)</button>
+      </form></li>
+      <li><form method="GET" action="/fetch">
+        <input name="url" placeholder="http://127.0.0.1:3000"><button>Fetch (SSRF)</button>
+      </form></li>
+      <li><a href="/admin">/admin (no auth)</a></li>
+      <li><a href="/debug/config">/debug/config (leaks env)</a></li>
     </ul>
-    
-    <h2>Test Forms:</h2>
-    <div id="login-form">
-      <h3>Login (SQL Injection)</h3>
-      <form method="POST" action="/login">
-        <input type="text" name="username" placeholder="Username" required><br>
-        <input type="password" name="password" placeholder="Password" required><br>
-        <button type="submit">Login</button>
-      </form>
-      <p><em>Try: admin' OR '1'='1' -- </em></p>
-    </div>
-    
-    <div id="search">
-      <h3>Search (Reflected XSS)</h3>
-      <form method="GET" action="/search">
-        <input type="text" name="q" placeholder="Search query">
-        <button type="submit">Search</button>
-      </form>
-      <p><em>Try: &lt;script&gt;alert('XSS')&lt;/script&gt;</em></p>
-    </div>
   `);
 });
 
-// VULNERABILITY: SQL Injection in login
-// FIX: Use parameterized queries or prepared statements
+// SQLi: unparameterized query
+// Fix: use parameterized queries/prepared statements.
 app.post('/login', (req, res) => {
-  console.log(`POST /login - ${req.ip}`);
-  const { username, password } = req.body;
-  
-  // INTENTIONALLY VULNERABLE: Direct string concatenation in SQL
-  const query = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
-  console.log(`Executing query: ${query}`);
-  
-  db.get(query, (err, row) => {
-    if (err) {
-      console.error('Database error:', err.message);
-      return res.status(500).send(`<h1>Database Error</h1><p>${err.message}</p><a href="/">Back</a>`);
-    }
-    
-    if (row) {
-      res.cookie('user', username, { httpOnly: false }); // Also vulnerable: not httpOnly
-      res.send(`<h1>Login Successful</h1><p>Welcome, ${username}!</p><a href="/admin">Go to Admin</a> | <a href="/">Home</a>`);
-    } else {
-      res.status(401).send(`<h1>Login Failed</h1><p>Invalid credentials</p><a href="/">Back</a>`);
-    }
+  const { username = '', password = '' } = req.body || {};
+  const q = `SELECT * FROM users WHERE username='${username}' AND password='${password}'`;
+  db.get(q, (err, row) => {
+    if (row) return res.send(`Welcome ${row.username}`);
+    return res.status(401).send('Invalid credentials');
   });
 });
 
-// VULNERABILITY: Reflected XSS + SQL Injection
-// FIX: Input validation, output encoding, parameterized queries
+// Reflected XSS + SQLi-like search (for demo: no real table)
+// Fix: encode output, validate input, parameterize queries.
 app.get('/search', (req, res) => {
-  console.log(`GET /search - ${req.ip}`);
-  const query = req.query.q || '';
-  
-  if (!query) {
-    return res.send(`
-      <h1>Search</h1>
-      <form method="GET" action="/search">
-        <input type="text" name="q" placeholder="Search query">
-        <button type="submit">Search</button>
-      </form>
-      <a href="/">Home</a>
-    `);
-  }
-  
-  // INTENTIONALLY VULNERABLE: Direct output without encoding (XSS)
-  // INTENTIONALLY VULNERABLE: SQL injection in search
-  const sqlQuery = `SELECT * FROM users WHERE username LIKE '%${query}%'`;
-  console.log(`Search query: ${sqlQuery}`);
-  
-  db.all(sqlQuery, (err, rows) => {
-    if (err) {
-      console.error('Search error:', err.message);
-      return res.status(500).send(`<h1>Search Error</h1><p>${err.message}</p><a href="/">Back</a>`);
-    }
-    
-    res.send(`
-      <h1>Search Results for: ${query}</h1>
-      <p>Found ${rows.length} results</p>
-      <ul>${rows.map(row => `<li>${row.username}</li>`).join('')}</ul>
-      <a href="/search">New Search</a> | <a href="/">Home</a>
-    `);
-  });
+  const q = req.query.q || '';
+  // Intentionally reflect unsanitized 'q'
+  res.send(`<h2>Results for: ${q}</h2><p>(No real search; this demonstrates reflected XSS.)</p>`);
 });
 
-// VULNERABILITY: Stored XSS in comments
-// FIX: Input validation, output encoding, CSP
-app.get('/comments', (req, res) => {
-  console.log(`GET /comments - ${req.ip}`);
-  
-  db.all('SELECT * FROM comments ORDER BY id DESC', (err, rows) => {
-    if (err) {
-      console.error('Comments error:', err.message);
-      return res.status(500).send(`Error: ${err.message}`);
-    }
-    
-    const commentsHtml = rows.map(row => `<div><strong>Comment #${row.id}:</strong> ${row.content}</div>`).join('');
-    
-    res.send(`
-      <h1>Comments</h1>
-      <div id="comments">${commentsHtml}</div>
-      
-      <h3>Add Comment (Stored XSS Vulnerable)</h3>
-      <form method="POST" action="/comment">
-        <textarea name="content" placeholder="Your comment" required></textarea><br>
-        <button type="submit">Add Comment</button>
-      </form>
-      <p><em>Try: &lt;script&gt;alert('Stored XSS')&lt;/script&gt;</em></p>
-      <a href="/">Home</a>
-    `);
-  });
-});
-
+// Stored XSS
+// Fix: encode on output, validate/strip tags, use templating that escapes.
 app.post('/comment', (req, res) => {
-  console.log(`POST /comment - ${req.ip}`);
-  const { content } = req.body;
-  
-  // INTENTIONALLY VULNERABLE: No input validation or sanitization
-  db.run('INSERT INTO comments (content) VALUES (?)', [content], function(err) {
-    if (err) {
-      console.error('Comment error:', err.message);
-      return res.status(500).send(`Error: ${err.message}`);
-    }
-    
-    res.redirect('/comments');
+  const { content = '' } = req.body || {};
+  db.run('INSERT INTO comments(content) VALUES (?)', [content], () => res.redirect('/comments'));
+});
+app.get('/comments', (req, res) => {
+  db.all('SELECT id, content FROM comments ORDER BY id DESC', (e, rows) => {
+    const html = rows
+      .map((r) => `<li>#${r.id}: ${r.content}</li>`)
+      .join('');
+    res.send(`<h2>Comments (Stored XSS)</h2><ul>${html}</ul><a href="/">Back</a>`);
   });
 });
 
-// VULNERABILITY: Insecure file upload
-// FIX: File type validation, size limits, virus scanning, safe storage
-app.get('/upload-form', (req, res) => {
-  res.send(`
-    <h1>File Upload (Insecure)</h1>
-    <form method="POST" action="/upload" enctype="multipart/form-data">
-      <input type="file" name="file" required>
-      <button type="submit">Upload</button>
-    </form>
-    <p><em>This endpoint accepts any file type without validation!</em></p>
-    <a href="/">Home</a>
-  `);
-});
-
+// Insecure upload
+// Fix: restrict types, scan, randomize names, store out of web root.
 app.post('/upload', upload.single('file'), (req, res) => {
-  console.log(`POST /upload - ${req.ip}`);
-  
-  if (!req.file) {
-    return res.status(400).send('No file uploaded');
-  }
-  
-  // INTENTIONALLY VULNERABLE: No file type validation, exposes file path
-  const filePath = req.file.path;
-  const originalName = req.file.originalname;
-  
-  res.send(`
-    <h1>File Uploaded Successfully</h1>
-    <p>Original name: ${originalName}</p>
-    <p>Saved to: ${filePath}</p>
-    <p>Size: ${req.file.size} bytes</p>
-    <a href="/upload-form">Upload Another</a> | <a href="/">Home</a>
-  `);
+  if (!req.file) return res.status(400).send('No file');
+  res.send(`Uploaded to ${req.file.path}`);
 });
 
-// VULNERABILITY: Command injection
-// FIX: Input validation, use safe APIs instead of shell execution
-app.get('/exec-form', (req, res) => {
-  res.send(`
-    <h1>Command Execution (Command Injection)</h1>
-    <form method="POST" action="/exec">
-      <input type="text" name="cmd" placeholder="Command to execute" required>
-      <button type="submit">Execute</button>
-    </form>
-    <p><em>Try: ls; cat /etc/passwd</em></p>
-    <a href="/">Home</a>
-  `);
-});
-
+// Command injection
+// Fix: never pass user input to shell; use safe APIs/allowlist.
 app.post('/exec', (req, res) => {
-  console.log(`POST /exec - ${req.ip}`);
-  const { cmd } = req.body;
-  
-  // INTENTIONALLY VULNERABLE: Direct command execution
-  exec(cmd, (error, stdout, stderr) => {
-    let output = '';
-    if (error) {
-      output = `Error: ${error.message}`;
-    } else {
-      output = stdout || stderr || 'Command executed (no output)';
-    }
-    
-    res.send(`
-      <h1>Command Execution Result</h1>
-      <p><strong>Command:</strong> ${cmd}</p>
-      <pre>${output}</pre>
-      <a href="/exec-form">Execute Another</a> | <a href="/">Home</a>
-    `);
+  const { cmd = '' } = req.body || {};
+  exec(cmd, { timeout: 3000 }, (err, stdout, stderr) => {
+    if (err) return res.status(500).send(`Error: ${stderr || err.message}`);
+    res.type('text/plain').send(stdout || '(no output)');
   });
 });
 
-// VULNERABILITY: SSRF (Server-Side Request Forgery)
-// FIX: URL allowlist, internal IP blocking, timeout limits
-app.get('/fetch-form', (req, res) => {
-  res.send(`
-    <h1>URL Fetcher (SSRF Vulnerable)</h1>
-    <form method="GET" action="/fetch">
-      <input type="url" name="url" placeholder="URL to fetch" required>
-      <button type="submit">Fetch</button>
-    </form>
-    <p><em>Try internal URLs like: http://localhost:3000/admin</em></p>
-    <a href="/">Home</a>
-  `);
-});
-
-app.get('/fetch', (req, res) => {
-  console.log(`GET /fetch - ${req.ip}`);
+// SSRF
+// Fix: enforce allowlist and scheme checks; fetch server-side only to trusted hosts.
+app.get('/fetch', async (req, res) => {
   const url = req.query.url;
-  
-  if (!url) {
-    return res.redirect('/fetch-form');
-  }
-  
-  // INTENTIONALLY VULNERABLE: No URL validation or allowlist
-  const client = url.startsWith('https') ? https : http;
-  
-  client.get(url, (response) => {
-    let data = '';
-    response.on('data', chunk => data += chunk);
-    response.on('end', () => {
-      res.send(`
-        <h1>Fetched URL: ${url}</h1>
-        <p><strong>Status:</strong> ${response.statusCode}</p>
-        <p><strong>Content-Type:</strong> ${response.headers['content-type']}</p>
-        <h3>Response Body:</h3>
-        <pre>${data.substring(0, 1000)}${data.length > 1000 ? '...' : ''}</pre>
-        <a href="/fetch-form">Fetch Another</a> | <a href="/">Home</a>
-      `);
-    });
-  }).on('error', (err) => {
-    res.status(500).send(`
-      <h1>Fetch Error</h1>
-      <p>Error fetching ${url}: ${err.message}</p>
-      <a href="/fetch-form">Try Again</a> | <a href="/">Home</a>
-    `);
-  });
-});
-
-// VULNERABILITY: Broken Access Control
-// FIX: Authentication and authorization checks
-app.get('/admin', (req, res) => {
-  console.log(`GET /admin - ${req.ip}`);
-  
-  // INTENTIONALLY VULNERABLE: No authentication check
-  db.all('SELECT * FROM users', (err, users) => {
-    if (err) {
-      return res.status(500).send(`Error: ${err.message}`);
+  if (!url) return res.status(400).send('Missing url');
+  try {
+    if (!fetch) {
+      return res.status(500).send('Fetch not initialized');
     }
-    
-    const userList = users.map(u => `<li>${u.username}: ${u.password}</li>`).join('');
-    
-    res.send(`
-      <h1>Admin Panel</h1>
-      <p><strong>WARNING:</strong> This page should require authentication!</p>
-      <h3>All Users:</h3>
-      <ul>${userList}</ul>
-      <h3>System Info:</h3>
-      <ul>
-        <li>Node Version: ${process.version}</li>
-        <li>Platform: ${process.platform}</li>
-        <li>Uptime: ${Math.floor(process.uptime())} seconds</li>
-      </ul>
-      <a href="/">Home</a>
-    `);
+    const r = await fetch(url);
+    const text = await r.text();
+    res.type('text/plain').send(text.slice(0, 2000));
+  } catch (e) {
+    res.status(500).send(String(e));
+  }
+});
+
+// Broken access control
+// Fix: require authN/Z guard.
+app.get('/admin', (req, res) => {
+  db.all('SELECT username, password FROM users', (e, rows) => {
+    res.json({ secret: 'This should be protected', users: rows });
   });
 });
 
-// VULNERABILITY: Information disclosure
-// FIX: Disable debug endpoints in production, limit exposed information
+// Debug config leak
+// Fix: disable in prod; never return env values.
 app.get('/debug/config', (req, res) => {
-  console.log(`GET /debug/config - ${req.ip}`);
-  
-  // INTENTIONALLY VULNERABLE: Exposing environment variables
-  res.json({
-    message: 'Debug endpoint - should not be exposed in production!',
-    environment: process.env,
-    cwd: process.cwd(),
-    argv: process.argv,
-    versions: process.versions
-  });
-});
-
-// Generic error handler that leaks information
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  
-  // INTENTIONALLY VULNERABLE: Exposing stack traces
-  res.status(500).send(`
-    <h1>Internal Server Error</h1>
-    <p><strong>Error:</strong> ${err.message}</p>
-    <pre>${err.stack}</pre>
-    <a href="/">Home</a>
-  `);
+  res.json(process.env);
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`🚨 VULNERABLE APP RUNNING ON http://localhost:${port}`);
-  console.log('⚠️  FOR TRAINING ONLY - DO NOT EXPOSE TO INTERNET');
-  console.log('📚 See README.md for vulnerability details');
-});
+app.listen(port, () => console.log(`Vulnerable app on http://localhost:${port}`));
+
+module.exports = app; // for tests

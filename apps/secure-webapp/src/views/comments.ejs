@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Comments</title></head>
+<body>
+  <h2>Comments</h2>
+  <ul>
+    <% rows.forEach(function(r){ %>
+      <li>#<%= r.id %>: <%= r.content %></li>
+    <% }) %>
+  </ul>
+  <a href="/">Back</a>
+</body></html>

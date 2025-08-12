@@ -1,0 +1,32 @@
+name: cybercapabilities-demo
+
+services:
+  vulnerable-webapp:
+    build: ./apps/vulnerable-webapp
+    image: cybercapabilities/vuln:latest
+    container_name: ccd-vuln
+    ports: ["3000:3000"]
+    environment:
+      - NODE_ENV=development
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  secure-webapp:
+    build: ./apps/secure-webapp
+    image: cybercapabilities/secure:latest
+    container_name: ccd-secure
+    ports: ["3001:3001"]
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3001/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped

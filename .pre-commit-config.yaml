@@ -1,0 +1,26 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3
+        additional_dependencies: []
+        files: ^apps/reverse-engineering/analysis/.*\.py$
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        additional_dependencies: ["prettier@3.3.3"]
+        files: \.(js|json|md|yml|yaml|ejs)$
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.7.0
+    hooks:
+      - id: eslint
+        args: ["--max-warnings=0"]
+        files: ^apps/(vulnerable-webapp|secure-webapp)/src/.*\.(js|mjs|cjs)$

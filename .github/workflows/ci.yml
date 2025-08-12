@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install vulnerable app deps
+        run: cd apps/vulnerable-webapp && npm ci
+      - name: Install secure app deps
+        run: cd apps/secure-webapp && npm ci
+      - name: Run tests (vulnerable)
+        run: cd apps/vulnerable-webapp && npm test
+      - name: Run tests (secure)
+        run: cd apps/secure-webapp && npm test
+
+  sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate SBOM (Syft)
+        uses: anchore/syft-action@v0
+        with:
+          image: dir:.
+          output: 'spdx-json=sbom.spdx.json'
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+      - name: Scan with Grype
+        uses: anchore/scan-action@v3
+        with:
+          path: .
+          fail-build: false
