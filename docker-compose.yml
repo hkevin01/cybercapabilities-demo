@@ -1,6 +1,28 @@
-name: cybercapabilities-demo
+version: '3.8'
 
 services:
+  dashboard:
+    build: ./apps/dashboard
+    image: cybercapabilities/dashboard:latest
+    container_name: ccd-dashboard
+    ports: 
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      vulnerable-webapp:
+        condition: service_healthy
+      secure-webapp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
   vulnerable-webapp:
     build: ./apps/vulnerable-webapp
     image: cybercapabilities/vuln:latest
@@ -9,7 +31,7 @@ services:
     environment:
       - NODE_ENV=development
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3000/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3000/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -24,7 +46,7 @@ services:
     environment:
       - NODE_ENV=production
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3001/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3001/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10

@@ -211,6 +211,16 @@ app.get('/admin', requireAuth, (req, res) => {
   res.json({ secret: 'Only for authenticated users', user: req.signedCookies.auth });
 });
 
+// Health check endpoint for monitoring
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    service: 'secure-webapp',
+    version: '1.0.0'
+  });
+});
+
 const port = process.env.PORT || 3001;
 app.listen(port, () => console.log(`Secure app on http://localhost:${port}`));
 

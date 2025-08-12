@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cybersecurity Demo Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-shield-alt"></i> Cybersecurity Demo Dashboard</h1>
+                <div class="header-stats">
+                    <div class="stat">
+                        <span class="stat-value" id="uptime">--</span>
+                        <span class="stat-label">Uptime</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="services-count">--</span>
+                        <span class="stat-label">Services</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-value" id="last-update">--</span>
+                        <span class="stat-label">Last Update</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav">
+            <button class="nav-btn active" data-tab="overview">
+                <i class="fas fa-tachometer-alt"></i> Overview
+            </button>
+            <button class="nav-btn" data-tab="services">
+                <i class="fas fa-server"></i> Services
+            </button>
+            <button class="nav-btn" data-tab="vulnerabilities">
+                <i class="fas fa-bug"></i> Vulnerabilities
+            </button>
+            <button class="nav-btn" data-tab="tests">
+                <i class="fas fa-vial"></i> Security Tests
+            </button>
+            <button class="nav-btn" data-tab="tools">
+                <i class="fas fa-tools"></i> Tools
+            </button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Overview Tab -->
+            <div class="tab-content active" id="overview">
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-heart"></i> Service Health</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="health-grid" id="health-overview">
+                                <!-- Dynamic content -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-chart-line"></i> Quick Stats</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="stats-grid">
+                                <div class="quick-stat">
+                                    <div class="quick-stat-value">10</div>
+                                    <div class="quick-stat-label">OWASP Top 10</div>
+                                </div>
+                                <div class="quick-stat">
+                                    <div class="quick-stat-value">2</div>
+                                    <div class="quick-stat-label">Web Apps</div>
+                                </div>
+                                <div class="quick-stat">
+                                    <div class="quick-stat-value">15+</div>
+                                    <div class="quick-stat-label">Security Tests</div>
+                                </div>
+                                <div class="quick-stat">
+                                    <div class="quick-stat-value">100%</div>
+                                    <div class="quick-stat-label">Dockerized</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-link"></i> Quick Actions</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="action-buttons">
+                                <button class="btn btn-primary" onclick="openApp('vulnerable')">
+                                    <i class="fas fa-bug"></i> Open Vulnerable App
+                                </button>
+                                <button class="btn btn-success" onclick="openApp('secure')">
+                                    <i class="fas fa-shield-alt"></i> Open Secure App
+                                </button>
+                                <button class="btn btn-info" onclick="runTests()">
+                                    <i class="fas fa-play"></i> Run Security Tests
+                                </button>
+                                <button class="btn btn-warning" onclick="generateReport()">
+                                    <i class="fas fa-file-alt"></i> Generate Report
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services Tab -->
+            <div class="tab-content" id="services">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-server"></i> Service Management</h3>
+                        <button class="btn btn-primary" onclick="refreshServices()">
+                            <i class="fas fa-sync"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="card-content">
+                        <div class="services-list" id="services-list">
+                            <!-- Dynamic content -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vulnerabilities Tab -->
+            <div class="tab-content" id="vulnerabilities">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-bug"></i> OWASP Top 10 Vulnerabilities</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="vulnerabilities-list" id="vulnerabilities-list">
+                            <!-- Dynamic content -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tests Tab -->
+            <div class="tab-content" id="tests">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-vial"></i> Security Test Results</h3>
+                        <button class="btn btn-primary" onclick="runAllTests()">
+                            <i class="fas fa-play"></i> Run All Tests
+                        </button>
+                    </div>
+                    <div class="card-content">
+                        <div class="tests-list" id="tests-list">
+                            <!-- Dynamic content -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tools Tab -->
+            <div class="tab-content" id="tools">
+                <div class="grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-hammer"></i> Reverse Engineering</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Challenge and keygen tools for educational purposes</p>
+                            <div class="action-buttons">
+                                <button class="btn btn-primary" onclick="runKeygen()">
+                                    <i class="fas fa-key"></i> Generate License
+                                </button>
+                                <button class="btn btn-info" onclick="viewChallenge()">
+                                    <i class="fas fa-puzzle-piece"></i> View Challenge
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-docker"></i> Docker Management</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Container orchestration and management</p>
+                            <div class="action-buttons">
+                                <button class="btn btn-success" onclick="dockerUp()">
+                                    <i class="fas fa-play"></i> Start All Services
+                                </button>
+                                <button class="btn btn-warning" onclick="dockerRestart()">
+                                    <i class="fas fa-redo"></i> Restart Services
+                                </button>
+                                <button class="btn btn-danger" onclick="dockerDown()">
+                                    <i class="fas fa-stop"></i> Stop All Services
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-terminal"></i> Development Tools</h3>
+                        </div>
+                        <div class="card-content">
+                            <p>Development and testing utilities</p>
+                            <div class="action-buttons">
+                                <button class="btn btn-primary" onclick="openVSCode()">
+                                    <i class="fas fa-code"></i> Open in VS Code
+                                </button>
+                                <button class="btn btn-info" onclick="viewLogs()">
+                                    <i class="fas fa-scroll"></i> View Logs
+                                </button>
+                                <button class="btn btn-secondary" onclick="runLinter()">
+                                    <i class="fas fa-check"></i> Run Linter
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-item">
+                <div class="status-indicator" id="connection-status"></div>
+                <span id="connection-text">Connecting...</span>
+            </div>
+            <div class="status-item">
+                <span id="status-message">Initializing dashboard...</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal for logs and outputs -->
+    <div class="modal" id="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Modal Title</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <pre id="modal-content"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

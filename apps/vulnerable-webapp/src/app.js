@@ -22,11 +22,8 @@ const cookieParser = require('cookie-parser');
 const { exec } = require('child_process');
 const multer = require('multer');
 
-// Dynamic import for node-fetch since it's ES module only
-let fetch;
-(async () => {
-  fetch = (await import('node-fetch')).default;
-})();
+// Use built-in fetch (Node 18+) or require node-fetch
+const fetch = globalThis.fetch || require('node-fetch');
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -144,9 +141,6 @@ app.get('/fetch', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send('Missing url');
   try {
-    if (!fetch) {
-      return res.status(500).send('Fetch not initialized');
-    }
     const r = await fetch(url);
     const text = await r.text();
     res.type('text/plain').send(text.slice(0, 2000));
@@ -160,6 +154,16 @@ app.get('/fetch', async (req, res) => {
 app.get('/admin', (req, res) => {
   db.all('SELECT username, password FROM users', (e, rows) => {
     res.json({ secret: 'This should be protected', users: rows });
+  });
+});
+
+// Health check endpoint for monitoring
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    service: 'vulnerable-webapp',
+    version: '1.0.0'
   });
 });
 
