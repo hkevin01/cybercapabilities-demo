@@ -1,4 +1,4 @@
-# MartinFed Cybersecurity Capabilities Demo
+# Cybersecurity Capabilities Demo
 
 This repository demonstrates end-to-end security engineering capabilities:
 - Software assurance (SAST, SCA, DAST) with reports

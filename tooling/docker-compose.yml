@@ -2,7 +2,7 @@ services:
   vulnerable-webapp:
     build:
       context: ../apps/vulnerable-webapp
-    image: martinfed/vuln-web:latest
+    image: vuln-web:latest
     ports:
       - "3000:3000"
     environment:
