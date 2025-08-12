@@ -15,7 +15,7 @@ const express = require('express');
 const helmet = require('helmet');
 const hpp = require('hpp');
 const cors = require('cors');
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const { z } = require('zod');
 const crypto = require('crypto');
 const path = require('path');
@@ -94,35 +94,41 @@ app.use((req, res, next) => {
   next();
 });
 
-// Database setup with better-sqlite3 (SECURITY: No SQL injection possible with prepared statements)
-const db = new Database(path.join(__dirname, '..', 'secure-db.sqlite'));
+// Database setup with sqlite3 and prepared statements (SECURITY: No SQL injection possible with prepared statements)
+const db = new sqlite3.Database(path.join(__dirname, '..', 'secure-db.sqlite'));
 
 // Initialize secure database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    salt TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      salt TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
   
-  CREATE TABLE IF NOT EXISTS comments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    content TEXT NOT NULL,
-    user_id INTEGER,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-  );
+  db.run(`
+    CREATE TABLE IF NOT EXISTS comments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT NOT NULL,
+      user_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `);
   
-  CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-  );
-`);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `);
+});
 
 // SECURITY: Secure password hashing
 function hashPassword(password, salt = crypto.randomBytes(32).toString('hex')) {
@@ -136,13 +142,18 @@ function verifyPassword(password, hash, salt) {
 }
 
 // Seed secure admin user
-const checkAdmin = db.prepare('SELECT COUNT(*) as count FROM users WHERE username = ?');
-if (checkAdmin.get('admin').count === 0) {
-  const { hash, salt } = hashPassword('SecureAdminPass123!');
-  const insertUser = db.prepare('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)');
-  insertUser.run('admin', hash, salt);
-  console.log('🔐 Secure admin user created');
-}
+db.get('SELECT COUNT(*) as count FROM users WHERE username = ?', ['admin'], (err, row) => {
+  if (!err && (!row || row.count === 0)) {
+    const { hash, salt } = hashPassword('SecureAdminPass123!');
+    db.run('INSERT INTO users (username, password_hash, salt) VALUES (?, ?, ?)', [
+      'admin', hash, salt
+    ], function(err) {
+      if (!err) {
+        console.log('🔐 Secure admin user created');
+      }
+    });
+  }
+});
 
 // SECURITY: Input validation schemas (OWASP ASVS V5: Validation, Sanitization and Encoding)
 const loginSchema = z.object({
@@ -168,24 +179,23 @@ function requireAuth(req, res, next) {
     `);
   }
   
-  const getSession = db.prepare(`
+  db.get(`
     SELECT s.*, u.username 
     FROM sessions s 
     JOIN users u ON s.user_id = u.id 
     WHERE s.id = ? AND s.expires_at > datetime('now')
-  `);
-  
-  const session = getSession.get(sessionId);
-  if (!session) {
-    res.clearCookie('sessionId');
-    return res.status(401).send(`
-      <h1>Session Expired</h1>
-      <p>Please <a href="/login-form">login</a> again.</p>
-    `);
-  }
-  
-  req.user = { id: session.user_id, username: session.username };
-  next();
+  `, [sessionId], (err, session) => {
+    if (err || !session) {
+      res.clearCookie('sessionId');
+      return res.status(401).send(`
+        <h1>Session Expired</h1>
+        <p>Please <a href="/login-form">login</a> again.</p>
+      `);
+    }
+    
+    req.user = { id: session.user_id, username: session.username };
+    next();
+  });
 }
 
 // SECURITY: SSRF protection allowlist
@@ -294,30 +304,34 @@ app.post('/login', async (req, res) => {
     const { username, password } = loginSchema.parse(req.body);
     
     // SECURITY: Prepared statement prevents SQL injection
-    const getUser = db.prepare('SELECT * FROM users WHERE username = ?');
-    const user = getUser.get(username);
-    
-    if (!user || !verifyPassword(password, user.password_hash, user.salt)) {
-      return res.status(401).send(`
-        <h1>Login Failed</h1>
-        <p>Invalid credentials</p>
-        <a href="/login-form">Try Again</a>
-      `);
-    }
-    
-    // Create secure session
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 3600000); // 1 hour
-    
-    const createSession = db.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)');
-    createSession.run(sessionId, user.id, expiresAt.toISOString());
-    
-    res.cookie('sessionId', sessionId);
-    res.send(`
-      <h1>Login Successful</h1>
-      <p>Welcome, ${username}!</p>
-      <a href="/admin">Admin Panel</a> | <a href="/">Home</a>
-    `);
+    db.get('SELECT * FROM users WHERE username = ?', [username], (err, user) => {
+      if (err || !user || !verifyPassword(password, user.password_hash, user.salt)) {
+        return res.status(401).send(`
+          <h1>Login Failed</h1>
+          <p>Invalid credentials</p>
+          <a href="/login-form">Try Again</a>
+        `);
+      }
+      
+      // Create secure session
+      const sessionId = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 3600000); // 1 hour
+      
+      db.run('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)', [
+        sessionId, user.id, expiresAt.toISOString()
+      ], (err) => {
+        if (err) {
+          return res.status(500).send('Session creation failed');
+        }
+        
+        res.cookie('sessionId', sessionId);
+        res.send(`
+          <h1>Login Successful</h1>
+          <p>Welcome, ${username}!</p>
+          <a href="/admin">Admin Panel</a> | <a href="/">Home</a>
+        `);
+      });
+    });
     
   } catch (rejRes) {
     if (rejRes instanceof z.ZodError) {
@@ -352,19 +366,22 @@ app.get('/search', (req, res) => {
     }
     
     // SECURITY: Prepared statement prevents SQL injection
-    const searchUsers = db.prepare('SELECT username FROM users WHERE username LIKE ?');
-    const results = searchUsers.all(`%${q}%`);
-    
-    // SECURITY: Proper HTML encoding prevents XSS
-    const safeQuery = q.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const resultsList = results.map(r => `<li>${r.username.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('');
-    
-    res.send(`
-      <h1>Search Results for: "${safeQuery}"</h1>
-      <p>Found ${results.length} results</p>
-      <ul>${resultsList}</ul>
-      <a href="/search">New Search</a> | <a href="/">Home</a>
-    `);
+    db.all('SELECT username FROM users WHERE username LIKE ?', [`%${q}%`], (err, results) => {
+      if (err) {
+        return res.status(500).send('Search error');
+      }
+      
+      // SECURITY: Proper HTML encoding prevents XSS
+      const safeQuery = q.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const resultsList = results.map(r => `<li>${r.username.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</li>`).join('');
+      
+      res.send(`
+        <h1>Search Results for: "${safeQuery}"</h1>
+        <p>Found ${results.length} results</p>
+        <ul>${resultsList}</ul>
+        <a href="/search">New Search</a> | <a href="/">Home</a>
+      `);
+    });
     
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -380,45 +397,50 @@ app.get('/search', (req, res) => {
 
 // SECURITY: Secure comments with authentication and output encoding
 app.get('/comments', (req, res) => {
-  const getComments = db.prepare(`
+  db.all(`
     SELECT c.*, u.username 
     FROM comments c 
     JOIN users u ON c.user_id = u.id 
     ORDER BY c.created_at DESC
-  `);
-  
-  const comments = getComments.all();
-  const commentsHtml = comments.map(c => {
-    const safeContent = c.content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const safeUsername = c.username.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<div><strong>${safeUsername}:</strong> ${safeContent}</div>`;
-  }).join('');
-  
-  const isAuthenticated = req.cookies.sessionId;
-  const commentForm = isAuthenticated ? `
-    <h3>Add Comment</h3>
-    <form method="POST" action="/comment">
-      <textarea name="content" placeholder="Your comment" required maxlength="500"></textarea><br>
-      <button type="submit">Add Comment</button>
-    </form>
-  ` : '<p><a href="/login-form">Login</a> to add comments</p>';
-  
-  res.send(`
-    <h1>Comments</h1>
-    <div>${commentsHtml}</div>
-    ${commentForm}
-    <a href="/">Home</a>
-  `);
+  `, (err, comments) => {
+    if (err) {
+      return res.status(500).send('Database error');
+    }
+    
+    const commentsHtml = comments.map(c => {
+      const safeContent = c.content.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeUsername = c.username.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `<div><strong>${safeUsername}:</strong> ${safeContent}</div>`;
+    }).join('');
+    
+    const isAuthenticated = req.cookies.sessionId;
+    const commentForm = isAuthenticated ? `
+      <h3>Add Comment</h3>
+      <form method="POST" action="/comment">
+        <textarea name="content" placeholder="Your comment" required maxlength="500"></textarea><br>
+        <button type="submit">Add Comment</button>
+      </form>
+    ` : '<p><a href="/login-form">Login</a> to add comments</p>';
+    
+    res.send(`
+      <h1>Comments</h1>
+      <div>${commentsHtml}</div>
+      ${commentForm}
+      <a href="/">Home</a>
+    `);
+  });
 });
 
 app.post('/comment', requireAuth, (req, res) => {
   try {
     const { content } = commentSchema.parse(req.body);
     
-    const insertComment = db.prepare('INSERT INTO comments (content, user_id) VALUES (?, ?)');
-    insertComment.run(content, req.user.id);
-    
-    res.redirect('/comments');
+    db.run('INSERT INTO comments (content, user_id) VALUES (?, ?)', [content, req.user.id], (err) => {
+      if (err) {
+        return res.status(500).send('Comment creation failed');
+      }
+      res.redirect('/comments');
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).send(`
@@ -524,27 +546,29 @@ app.get('/admin', requireAuth, (req, res) => {
     `);
   }
   
-  const getUsers = db.prepare('SELECT id, username, created_at FROM users');
-  const users = getUsers.all();
-  
-  const userList = users.map(u => 
-    `<li>ID: ${u.id}, Username: ${u.username}, Created: ${u.created_at}</li>`
-  ).join('');
-  
-  res.send(`
-    <h1>Admin Panel (Secure)</h1>
-    <p>Welcome, ${req.user.username}</p>
-    <h3>Users (sensitive data protected):</h3>
-    <ul>${userList}</ul>
-    <a href="/logout">Logout</a> | <a href="/">Home</a>
-  `);
+  db.all('SELECT id, username, created_at FROM users', (err, users) => {
+    if (err) {
+      return res.status(500).send('Database error');
+    }
+    
+    const userList = users.map(u => 
+      `<li>ID: ${u.id}, Username: ${u.username}, Created: ${u.created_at}</li>`
+    ).join('');
+    
+    res.send(`
+      <h1>Admin Panel (Secure)</h1>
+      <p>Welcome, ${req.user.username}</p>
+      <h3>Users (sensitive data protected):</h3>
+      <ul>${userList}</ul>
+      <a href="/logout">Logout</a> | <a href="/">Home</a>
+    `);
+  });
 });
 
 app.get('/logout', (req, res) => {
   const sessionId = req.cookies.sessionId;
   if (sessionId) {
-    const deleteSession = db.prepare('DELETE FROM sessions WHERE id = ?');
-    deleteSession.run(sessionId);
+    db.run('DELETE FROM sessions WHERE id = ?', [sessionId]);
   }
   
   res.clearCookie('sessionId');
